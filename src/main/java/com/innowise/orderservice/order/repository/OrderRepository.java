@@ -26,4 +26,6 @@ public interface OrderRepository extends JpaRepository<Order, UUID>, JpaSpecific
     void softDeleteById(@Param("id") UUID id, @Param("updatedAt") LocalDateTime updatedAt);
 
     Page<Order> findAllByUserIdAndDeletedFalse(UUID userId, Pageable pageable);
+
+    boolean existsByIdAndUserId(UUID id, UUID userId);
 }
