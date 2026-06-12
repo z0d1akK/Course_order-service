@@ -10,6 +10,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
@@ -20,6 +22,12 @@ import org.springframework.test.web.servlet.MockMvc;
 })
 @ActiveProfiles("test")
 public abstract class AbstractIntegrationTest {
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        int port = WireMockConfiguration.getPort();
+        registry.add("user-service.url", () -> "http://localhost:" + port);
+    }
 
     @Autowired
     protected MockMvc mockMvc;
