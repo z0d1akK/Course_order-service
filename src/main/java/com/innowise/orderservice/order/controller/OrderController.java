@@ -43,7 +43,7 @@ public class OrderController {
     @ApiResponse(responseCode = "403", description = "Access denied for current user",
             content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
     )
-    @PreAuthorize("@orderOwnershipService.isOwnerOrAdmin(#request.userId)")
+    @PreAuthorize("@ownershipService.isOwnerOrAdmin(#request.userId)")
     @PostMapping
     public ResponseEntity<OrderDetailsResponseDto> create(@Valid @RequestBody CreateOrderRequestDto request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(orderService.create(request));
@@ -93,6 +93,9 @@ public class OrderController {
     @Operation(summary = "Update order", description = "Updates existing order")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "200", description = "Order successfully updated")
+    @ApiResponse(responseCode = "400", description = "Validation error",
+            content = @Content(schema = @Schema(implementation = ValidationErrorResponse.class))
+    )
     @ApiResponse(responseCode = "401", description = "Unauthorized user detected",
             content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
     )
@@ -101,9 +104,6 @@ public class OrderController {
     )
     @ApiResponse(responseCode = "404", description = "Order not found",
             content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
-    )
-    @ApiResponse(responseCode = "400", description = "Validation error",
-            content = @Content(schema = @Schema(implementation = ValidationErrorResponse.class))
     )
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @PatchMapping("/{id}")

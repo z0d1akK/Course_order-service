@@ -1,12 +1,13 @@
 package com.innowise.orderservice.common.advice;
 
-import com.innowise.orderservice.client.user.exception.UserServiceUnavailableException;
+import com.innowise.orderservice.client.user.exception.UserServiceException;
 import com.innowise.orderservice.common.dto.field.ValidationErrorField;
 import com.innowise.orderservice.common.dto.response.ApiErrorResponse;
 import com.innowise.orderservice.common.dto.response.ValidationErrorResponse;
 import com.innowise.orderservice.common.exception.BusinessException;
 import com.innowise.orderservice.common.exception.ErrorMessages;
 import com.innowise.orderservice.common.exception.ResourceNotFoundException;
+import feign.FeignException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -75,8 +76,8 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
     }
 
-    @ExceptionHandler(UserServiceUnavailableException.class)
-    public ResponseEntity<ApiErrorResponse> handleUserServiceUnavailable(UserServiceUnavailableException ex) {
+    @ExceptionHandler(FeignException.ServiceUnavailable.class)
+    public ResponseEntity<ApiErrorResponse> handleFeignServiceUnavailable(FeignException.ServiceUnavailable ex) {
         ApiErrorResponse response = ApiErrorResponse.builder()
                 .status(HttpStatus.SERVICE_UNAVAILABLE.value())
                 .error(HttpStatus.SERVICE_UNAVAILABLE.getReasonPhrase())
@@ -85,6 +86,32 @@ public class GlobalExceptionHandler {
                 .build();
 
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+    }
+
+    @ExceptionHandler(FeignException.InternalServerError.class)
+    public ResponseEntity<ApiErrorResponse> handleFeignInternalServerError(FeignException.InternalServerError ex) {
+        ApiErrorResponse response = ApiErrorResponse.builder()
+                .status(HttpStatus.SERVICE_UNAVAILABLE.value())
+                .error(HttpStatus.SERVICE_UNAVAILABLE.getReasonPhrase())
+                .message(ErrorMessages.USER_SERVICE_UNAVAILABLE)
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
+    }
+
+    @ExceptionHandler(UserServiceException.class)
+    public ResponseEntity<ApiErrorResponse> handleUserServiceException(UserServiceException ex) {
+        HttpStatus status = determineHttpStatus(ex);
+
+        ApiErrorResponse response = ApiErrorResponse.builder()
+                .status(status.value())
+                .error(status.getReasonPhrase())
+                .message(ex.getMessage())
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        return ResponseEntity.status(status).body(response);
     }
 
     @ExceptionHandler(Exception.class)
@@ -104,5 +131,23 @@ public class GlobalExceptionHandler {
                 .field(error.getField())
                 .message(error.getDefaultMessage())
                 .build();
+    }
+
+    private HttpStatus determineHttpStatus(UserServiceException ex) {
+        String message = ex.getMessage();
+
+        if (message != null) {
+            if (message.contains(ErrorMessages.USER_NOT_FOUND)) {
+                return HttpStatus.NOT_FOUND;
+            } else if (message.contains(ErrorMessages.ACCESS_DENIED)) {
+                return HttpStatus.FORBIDDEN;
+            } else if (message.contains(ErrorMessages.UNAUTHORIZED)) {
+                return HttpStatus.UNAUTHORIZED;
+            } else if (message.contains(ErrorMessages.USER_SERVICE_UNAVAILABLE)) {
+                return HttpStatus.SERVICE_UNAVAILABLE;
+            }
+        }
+
+        return HttpStatus.INTERNAL_SERVER_ERROR;
     }
 }

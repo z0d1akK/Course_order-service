@@ -66,6 +66,9 @@ public class ItemController {
     @Operation(summary = "Update item", description = "Updates existing item")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "200", description = "Item successfully updated")
+    @ApiResponse(responseCode = "400", description = "Validation error",
+            content = @Content(schema = @Schema(implementation = ValidationErrorResponse.class))
+    )
     @ApiResponse(responseCode = "401", description = "Unauthorized user detected",
             content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
     )
@@ -74,9 +77,6 @@ public class ItemController {
     )
     @ApiResponse(responseCode = "404", description = "Item not found",
             content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
-    )
-    @ApiResponse(responseCode = "400", description = "Validation error",
-            content = @Content(schema = @Schema(implementation = ValidationErrorResponse.class))
     )
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @PatchMapping("/{id}")
