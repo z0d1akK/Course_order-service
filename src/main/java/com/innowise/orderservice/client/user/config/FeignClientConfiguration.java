@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
 @RequiredArgsConstructor
 public class FeignClientConfiguration {
 
-    private final JwtFeignInterceptor jwtFeignInterceptor;
+    private final UserContextFeignInterceptor userContextFeignInterceptor;
 
     @Bean
     public ErrorDecoder errorDecoder() {
@@ -20,6 +20,6 @@ public class FeignClientConfiguration {
 
     @Bean
     public RequestInterceptor requestInterceptor() {
-        return jwtFeignInterceptor;
+        return userContextFeignInterceptor;
     }
 }

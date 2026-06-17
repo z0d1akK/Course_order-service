@@ -15,6 +15,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -106,7 +107,7 @@ public class OrderController {
     )
     @PreAuthorize("hasAuthority('ROLE_ADMIN')")
     @GetMapping
-    public ResponseEntity<Page<OrderDetailsResponseDto>> getAll(OrderFilterRequestDto filter, Pageable pageable) {
+    public ResponseEntity<Page<OrderDetailsResponseDto>> getAll(@ParameterObject OrderFilterRequestDto filter, Pageable pageable) {
         return ResponseEntity.ok(orderService.getAll(filter, pageable));
     }
 
@@ -120,6 +121,12 @@ public class OrderController {
     @Operation(summary = "Get current user orders", description = "Returns paginated list of current user orders")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "200", description = "Orders successfully retrieved")
+    @ApiResponse(responseCode = "401", description = "Unauthorized user detected",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+    )
+    @ApiResponse(responseCode = "403", description = "Access denied for current user",
+            content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))
+    )
     @GetMapping("/my")
     public ResponseEntity<Page<OrderDetailsResponseDto>> getMyOrders(Pageable pageable) {
         return ResponseEntity.ok(orderService.getByUserId(SecurityUtils.getCurrentUserId(), pageable));

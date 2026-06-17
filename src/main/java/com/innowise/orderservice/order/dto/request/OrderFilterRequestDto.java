@@ -16,14 +16,23 @@ import java.util.Set;
 @Schema(description = "DTO for filtering orders")
 public class OrderFilterRequestDto {
 
-    @Schema(description = "Created from date")
+    @Schema(
+            description = "Return orders created from specified date and time",
+            example = "2026-06-01T00:00:00"
+    )
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private LocalDateTime createdFrom;
 
-    @Schema(description = "Created to date")
+    @Schema(
+            description = "Return orders created before specified date and time",
+            example = "2026-06-30T23:59:59"
+    )
     @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
     private LocalDateTime createdTo;
 
-    @Schema(description = "Order statuses")
+    @Schema(
+            description = "Order statuses",
+            example = "CREATED,PAID"
+    )
     private Set<OrderStatus> statuses;
 }

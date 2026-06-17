@@ -1,6 +1,6 @@
 package com.innowise.orderservice.security.config;
 
-import com.innowise.orderservice.security.filter.JwtAuthenticationFilter;
+import com.innowise.orderservice.security.filter.GatewayAuthenticationFilter;
 import com.innowise.orderservice.security.handler.CustomAccessDeniedHandler;
 import com.innowise.orderservice.security.handler.CustomAuthenticationEntryPoint;
 import org.springframework.http.HttpMethod;
@@ -19,7 +19,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final GatewayAuthenticationFilter gatewayAuthenticationFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -37,7 +37,7 @@ public class SecurityConfig {
                         .accessDeniedHandler(new CustomAccessDeniedHandler())
                 )
                 .addFilterBefore(
-                        jwtAuthenticationFilter,
+                        gatewayAuthenticationFilter,
                         UsernamePasswordAuthenticationFilter.class
                 )
                 .build();
