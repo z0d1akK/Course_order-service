@@ -71,14 +71,19 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public Page<OrderDetailsResponseDto> getAll(OrderFilterRequestDto filter, Pageable pageable) {
-        return orderRepository.findAll(
-                        OrderSpecification.notDeleted()
-                                .and(OrderSpecification.createdFrom(filter.getCreatedFrom()))
-                                .and(OrderSpecification.createdTo(filter.getCreatedTo()))
-                                .and(OrderSpecification.hasStatuses(filter.getStatuses())),
-                        pageable
-                )
-                .map(this::buildResponse);
+        Page<Order> orders = orderRepository.findAll(
+                OrderSpecification.notDeleted()
+                        .and(OrderSpecification.createdFrom(filter.getCreatedFrom()))
+                        .and(OrderSpecification.createdTo(filter.getCreatedTo()))
+                        .and(OrderSpecification.hasStatuses(filter.getStatuses())),
+                pageable
+        );
+
+        if (orders.isEmpty()) {
+            return Page.empty(pageable);
+        }
+
+        return orders.map(this::buildResponse);
     }
 
     @Override
