@@ -23,7 +23,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
 
-      USER_SERVICE_URL: ${USER_SERVICE_URL}
+      USER_SERVICE_DOCKER_URL: ${USER_SERVICE_DOCKER_URL}
 
     depends_on:
       postgres:
@@ -31,6 +31,7 @@ services:
 
     networks:
       - order-service-network
+      - user-service-network
 
 
   postgres:
@@ -44,9 +45,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_HOST_PORT: ${POSTGRES_HOST_PORT}
 
     ports:
-      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+      - "${POSTGRES_HOST_PORT}:${POSTGRES_PORT}"
 
     command: -p ${POSTGRES_PORT}
 
@@ -71,3 +74,7 @@ volumes:
 networks:
   order-service-network:
     driver: bridge
+    name: order-service-network
+  user-service-network:
+    external: true
+    name: user-service-network
