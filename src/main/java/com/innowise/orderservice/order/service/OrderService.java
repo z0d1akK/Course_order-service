@@ -1,5 +1,6 @@
 package com.innowise.orderservice.order.service;
 
+import com.innowise.orderservice.kafka.event.PaymentStatus;
 import com.innowise.orderservice.order.dto.request.CreateOrderRequestDto;
 import com.innowise.orderservice.order.dto.request.OrderFilterRequestDto;
 import com.innowise.orderservice.order.dto.request.UpdateOrderRequestDto;
@@ -65,6 +66,14 @@ public interface OrderService {
      * @return updated order details response
      */
     OrderDetailsResponseDto update(UUID id, UpdateOrderRequestDto request);
+
+    /**
+     * Updates order status according to completed payment event.
+     *
+     * @param orderId payment order identifier
+     * @param paymentStatus payment result
+     */
+    void updateStatus(UUID orderId, PaymentStatus paymentStatus);
 
     /**
      * Performs soft deletion of an order.

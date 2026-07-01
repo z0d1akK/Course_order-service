@@ -9,6 +9,10 @@ public class ErrorMessages {
 
     public static final String ITEM_NOT_FOUND = "Item not found with id: %s";
 
+    public static final String ITEM_ALREADY_EXISTS = "Item already exists";
+
+    public static final String ITEM_IN_USE = "Item with id %s is used in orders: %s";
+
     public static final String USER_NOT_FOUND = "User not found";
 
     public static final String ACCESS_DENIED = "Access denied";

@@ -5,6 +5,7 @@ import com.innowise.orderservice.client.user.feign.UserServiceClient;
 import com.innowise.orderservice.item.entity.Item;
 import com.innowise.orderservice.item.exception.ItemNotFoundException;
 import com.innowise.orderservice.item.repository.ItemRepository;
+import com.innowise.orderservice.kafka.event.PaymentStatus;
 import com.innowise.orderservice.order.dto.request.CreateOrderRequestDto;
 import com.innowise.orderservice.order.dto.request.OrderFilterRequestDto;
 import com.innowise.orderservice.order.dto.request.OrderItemRequestDto;
@@ -12,6 +13,7 @@ import com.innowise.orderservice.order.dto.request.UpdateOrderRequestDto;
 import com.innowise.orderservice.order.dto.response.OrderDetailsResponseDto;
 import com.innowise.orderservice.order.entity.Order;
 import com.innowise.orderservice.order.entity.OrderItem;
+import com.innowise.orderservice.order.entity.OrderStatus;
 import com.innowise.orderservice.order.exception.OrderNotFoundException;
 import com.innowise.orderservice.order.mapper.OrderDetailsMapper;
 import com.innowise.orderservice.order.mapper.OrderMapper;
@@ -75,7 +77,7 @@ public class OrderServiceImpl implements OrderService {
                 OrderSpecification.notDeleted()
                         .and(OrderSpecification.createdFrom(filter.getCreatedFrom()))
                         .and(OrderSpecification.createdTo(filter.getCreatedTo()))
-                        .and(OrderSpecification.hasStatuses(filter.getStatuses())),
+                        .and(OrderSpecification.hasStatuses(filter.getStatusesAsSet())),
                 pageable
         );
 
@@ -114,6 +116,20 @@ public class OrderServiceImpl implements OrderService {
         }
 
         return buildResponse(orderRepository.save(order));
+    }
+
+    @Override
+    @Transactional
+    public void updateStatus(UUID orderId, PaymentStatus paymentStatus) {
+
+        Order order = getOrderEntity(orderId);
+
+        switch (paymentStatus) {
+            case SUCCESS -> order.setStatus(OrderStatus.PROCESSING);
+            case FAILED -> order.setStatus(OrderStatus.CANCELLED);
+        }
+
+        orderRepository.save(order);
     }
 
     @Override

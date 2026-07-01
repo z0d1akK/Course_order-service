@@ -25,6 +25,9 @@ services:
 
       USER_SERVICE_DOCKER_URL: ${USER_SERVICE_DOCKER_URL}
 
+      KAFKA_HOST: ${KAFKA_HOST}
+      KAFKA_PORT: ${KAFKA_PORT}
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,6 +35,7 @@ services:
     networks:
       - order-service-network
       - user-service-network
+      - kafka-network
 
 
   postgres:
@@ -78,3 +82,6 @@ networks:
   user-service-network:
     external: true
     name: user-service-network
+  kafka-network:
+    external: true
+    name: kafka-network

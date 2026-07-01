@@ -6,7 +6,10 @@ import lombok.*;
 import org.springframework.format.annotation.DateTimeFormat;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Getter
 @Setter
@@ -31,8 +34,20 @@ public class OrderFilterRequestDto {
     private LocalDateTime createdTo;
 
     @Schema(
-            description = "Order statuses",
-            example = "CREATED,PAID"
+            description = "Order statuses (comma-separated). Allowed values: CREATED, CANCELLED, PROCESSING, COMPLETED",
+            example = "CREATED,PROCESSING"
     )
-    private Set<OrderStatus> statuses;
+    private String statuses;
+
+    public Set<OrderStatus> getStatusesAsSet() {
+        if (statuses == null || statuses.isBlank()) {
+            return Collections.emptySet();
+        }
+
+        return Arrays.stream(statuses.split(","))
+                .map(String::trim)
+                .map(String::toUpperCase)
+                .map(OrderStatus::valueOf)
+                .collect(Collectors.toSet());
+    }
 }
