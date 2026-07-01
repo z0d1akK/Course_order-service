@@ -9,7 +9,6 @@ on:
 env:
   JAVA_VERSION: 21
   IMAGE_NAME: ghcr.io/${{ github.repository }}
-  JWT_SECRET: ${{ secrets.JWT_SECRET }}
   ACTIVE_PROFILE: test
 
 jobs:
