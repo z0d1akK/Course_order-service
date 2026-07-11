@@ -74,6 +74,7 @@ jobs:
       - name: Run integration tests
         env:
           GATEWAY_API_KEY: ${{ secrets.GATEWAY_API_KEY }}
+          CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
         run: mvn verify -Pintegration-tests
 
       - name: Upload integration test reports
