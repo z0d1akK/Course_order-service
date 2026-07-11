@@ -5,6 +5,9 @@ import com.innowise.orderservice.client.user.feign.UserServiceClient;
 import com.innowise.orderservice.item.entity.Item;
 import com.innowise.orderservice.item.exception.ItemNotFoundException;
 import com.innowise.orderservice.item.repository.ItemRepository;
+import com.innowise.orderservice.kafka.event.CreateOrderEvent;
+import com.innowise.orderservice.kafka.event.PaymentStatus;
+import com.innowise.orderservice.kafka.producer.OrderEventProducer;
 import com.innowise.orderservice.order.dto.request.CreateOrderRequestDto;
 import com.innowise.orderservice.order.dto.request.OrderFilterRequestDto;
 import com.innowise.orderservice.order.dto.request.OrderItemRequestDto;
@@ -12,6 +15,7 @@ import com.innowise.orderservice.order.dto.request.UpdateOrderRequestDto;
 import com.innowise.orderservice.order.dto.response.OrderDetailsResponseDto;
 import com.innowise.orderservice.order.dto.response.OrderResponseDto;
 import com.innowise.orderservice.order.entity.Order;
+import com.innowise.orderservice.order.entity.OrderItem;
 import com.innowise.orderservice.order.entity.OrderStatus;
 import com.innowise.orderservice.order.exception.OrderNotFoundException;
 import com.innowise.orderservice.order.mapper.OrderDetailsMapper;
@@ -21,12 +25,14 @@ import com.innowise.orderservice.order.service.impl.OrderServiceImpl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -53,6 +59,9 @@ class OrderServiceImplTest {
 
     @Mock
     private UserServiceClient userServiceClient;
+
+    @Mock
+    private OrderEventProducer orderEventProducer;
 
     @InjectMocks
     private OrderServiceImpl orderService;
@@ -88,6 +97,14 @@ class OrderServiceImplTest {
         assertThat(result).isEqualTo(response);
 
         verify(orderRepository).save(any(Order.class));
+
+        ArgumentCaptor<CreateOrderEvent> eventCaptor = ArgumentCaptor.forClass(CreateOrderEvent.class);
+        verify(orderEventProducer).publishOrderCreatedEvent(eventCaptor.capture());
+
+        CreateOrderEvent capturedEvent = eventCaptor.getValue();
+        assertThat(capturedEvent.getOrderId()).isEqualTo(orderId);
+        assertThat(capturedEvent.getUserId()).isEqualTo(userId);
+        assertThat(capturedEvent.getTotalPrice()).isEqualByComparingTo(order.getTotalPrice());
     }
 
     @Test
@@ -292,6 +309,148 @@ class OrderServiceImplTest {
 
         assertThatThrownBy(() -> orderService.update(orderId, request))
                 .isInstanceOf(ItemNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("Should update order status to PROCESSING when payment is SUCCESS")
+    void updateStatus_WhenPaymentSuccess_ShouldSetProcessingStatus() {
+        UUID orderId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
+        Order order = createOrder(orderId, userId);
+        order.setStatus(OrderStatus.CREATED);
+
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+
+        orderService.updateStatus(orderId, PaymentStatus.SUCCESS);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PROCESSING);
+
+        verify(orderRepository).findById(orderId);
+        verify(orderRepository).save(order);
+    }
+
+    @Test
+    @DisplayName("Should update order status to CANCELLED when payment is FAILED")
+    void updateStatus_WhenPaymentFailed_ShouldSetCancelledStatus() {
+        UUID orderId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
+        Order order = createOrder(orderId, userId);
+        order.setStatus(OrderStatus.CREATED);
+
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+
+        orderService.updateStatus(orderId, PaymentStatus.FAILED);
+
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+
+        verify(orderRepository).findById(orderId);
+        verify(orderRepository).save(order);
+    }
+
+    @Test
+    @DisplayName("Should throw OrderNotFoundException when updating status of non-existing order")
+    void updateStatus_WhenOrderNotExists_ShouldThrowException() {
+        UUID orderId = UUID.randomUUID();
+
+        when(orderRepository.findById(orderId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.updateStatus(orderId, PaymentStatus.SUCCESS))
+                .isInstanceOf(OrderNotFoundException.class)
+                .hasMessageContaining(orderId.toString());
+
+        verify(orderRepository).findById(orderId);
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("Should throw OrderNotFoundException when updating status of deleted order")
+    void updateStatus_WhenOrderDeleted_ShouldThrowException() {
+        UUID orderId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
+        Order deletedOrder = createDeletedOrder(orderId, userId);
+
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(deletedOrder));
+
+        assertThatThrownBy(() -> orderService.updateStatus(orderId, PaymentStatus.SUCCESS))
+                .isInstanceOf(OrderNotFoundException.class);
+
+        verify(orderRepository).findById(orderId);
+        verify(orderRepository, never()).save(any(Order.class));
+    }
+
+    @Test
+    @DisplayName("Should persist status change to database when payment is SUCCESS")
+    void updateStatus_WhenPaymentSuccess_ShouldPersistChanges() {
+        UUID orderId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
+        Order order = createOrder(orderId, userId);
+        order.setStatus(OrderStatus.CREATED);
+
+        Order savedOrder = createOrder(orderId, userId);
+        savedOrder.setStatus(OrderStatus.PROCESSING);
+
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(order)).thenReturn(savedOrder);
+
+        orderService.updateStatus(orderId, PaymentStatus.SUCCESS);
+
+        verify(orderRepository).save(order);
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("Should not modify order items when updating status")
+    void updateStatus_ShouldNotModifyOrderItems() {
+        UUID orderId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
+        Order order = createOrder(orderId, userId);
+        order.setStatus(OrderStatus.CREATED);
+
+        OrderItem orderItem = OrderItem.builder()
+                .order(order)
+                .item(createItem(UUID.randomUUID()))
+                .quantity(2)
+                .build();
+
+        order.setOrderItems(List.of(orderItem));
+
+        List<OrderItem> originalItems = List.copyOf(order.getOrderItems());
+
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+
+        orderService.updateStatus(orderId, PaymentStatus.SUCCESS);
+
+        assertThat(order.getOrderItems())
+                .hasSameSizeAs(originalItems)
+                .containsExactlyElementsOf(originalItems);
+    }
+
+    @Test
+    @DisplayName("Should not change total price when updating status")
+    void updateStatus_ShouldNotChangeTotalPrice() {
+        UUID orderId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
+        Order order = createOrder(orderId, userId);
+        order.setStatus(OrderStatus.CREATED);
+        order.setTotalPrice(new BigDecimal("150.00"));
+
+        BigDecimal originalTotalPrice = order.getTotalPrice();
+
+        when(orderRepository.findById(orderId)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+
+        orderService.updateStatus(orderId, PaymentStatus.SUCCESS);
+
+        assertThat(order.getTotalPrice()).isEqualByComparingTo(originalTotalPrice);
     }
 
     @Test

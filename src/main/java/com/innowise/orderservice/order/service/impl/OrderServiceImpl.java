@@ -5,7 +5,9 @@ import com.innowise.orderservice.client.user.feign.UserServiceClient;
 import com.innowise.orderservice.item.entity.Item;
 import com.innowise.orderservice.item.exception.ItemNotFoundException;
 import com.innowise.orderservice.item.repository.ItemRepository;
+import com.innowise.orderservice.kafka.event.CreateOrderEvent;
 import com.innowise.orderservice.kafka.event.PaymentStatus;
+import com.innowise.orderservice.kafka.producer.OrderEventProducer;
 import com.innowise.orderservice.order.dto.request.CreateOrderRequestDto;
 import com.innowise.orderservice.order.dto.request.OrderFilterRequestDto;
 import com.innowise.orderservice.order.dto.request.OrderItemRequestDto;
@@ -21,6 +23,7 @@ import com.innowise.orderservice.order.repository.OrderRepository;
 import com.innowise.orderservice.order.repository.specification.OrderSpecification;
 import com.innowise.orderservice.order.service.OrderService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -32,6 +35,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class OrderServiceImpl implements OrderService {
@@ -45,6 +49,8 @@ public class OrderServiceImpl implements OrderService {
     private final OrderDetailsMapper orderDetailsMapper;
 
     private final UserServiceClient userServiceClient;
+
+    private final OrderEventProducer orderEventProducer;
 
     @Override
     @Transactional
@@ -62,6 +68,21 @@ public class OrderServiceImpl implements OrderService {
         order.setTotalPrice(calculateTotalPrice(orderItems));
 
         Order savedOrder = orderRepository.save(order);
+
+        log.info(
+                "Order created successfully. OrderId={}, UserId={}, TotalPrice={}",
+                savedOrder.getId(),
+                savedOrder.getUserId(),
+                savedOrder.getTotalPrice()
+        );
+
+        orderEventProducer.publishOrderCreatedEvent(
+                CreateOrderEvent.builder()
+                        .orderId(savedOrder.getId())
+                        .userId(savedOrder.getUserId())
+                        .totalPrice(savedOrder.getTotalPrice())
+                        .build()
+        );
 
         return buildResponse(savedOrder);
     }
@@ -121,15 +142,31 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public void updateStatus(UUID orderId, PaymentStatus paymentStatus) {
-
         Order order = getOrderEntity(orderId);
 
-        switch (paymentStatus) {
-            case SUCCESS -> order.setStatus(OrderStatus.PROCESSING);
-            case FAILED -> order.setStatus(OrderStatus.CANCELLED);
+        OrderStatus newStatus = switch (paymentStatus) {
+            case SUCCESS -> OrderStatus.PROCESSING;
+            case FAILED -> OrderStatus.CANCELLED;
+        };
+
+        if (order.getStatus() == newStatus) {
+            log.info(
+                    "Duplicate payment event ignored. OrderId={}, Status={}",
+                    orderId,
+                    newStatus
+            );
+            return;
         }
 
+        order.setStatus(newStatus);
+
         orderRepository.save(order);
+
+        log.info(
+                "Order status updated successfully. OrderId={}, Status={}",
+                orderId,
+                newStatus
+        );
     }
 
     @Override

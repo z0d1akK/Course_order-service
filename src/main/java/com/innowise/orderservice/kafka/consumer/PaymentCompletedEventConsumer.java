@@ -15,7 +15,7 @@ public class PaymentCompletedEventConsumer {
 
     private final OrderService orderService;
 
-    @KafkaListener(topics = KafkaTopics.PAYMENT_EVENTS, groupId = "${spring.kafka.consumer.group-id}")
+    @KafkaListener(topics = KafkaTopics.PAYMENT_COMPLETED, groupId = "${spring.kafka.consumer.group-id}")
     public void consume(PaymentCompletedEvent event) {
 
         log.info(

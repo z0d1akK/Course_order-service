@@ -1,5 +1,6 @@
 package com.innowise.orderservice.security.config;
 
+import com.innowise.orderservice.security.filter.GatewayApiKeyFilter;
 import com.innowise.orderservice.security.filter.GatewayAuthenticationFilter;
 import com.innowise.orderservice.security.handler.CustomAccessDeniedHandler;
 import com.innowise.orderservice.security.handler.CustomAuthenticationEntryPoint;
@@ -21,6 +22,8 @@ public class SecurityConfig {
 
     private final GatewayAuthenticationFilter gatewayAuthenticationFilter;
 
+    private final GatewayApiKeyFilter gatewayApiKeyFilter;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         return http
@@ -38,8 +41,12 @@ public class SecurityConfig {
                         .accessDeniedHandler(new CustomAccessDeniedHandler())
                 )
                 .addFilterBefore(
-                        gatewayAuthenticationFilter,
+                        gatewayApiKeyFilter,
                         UsernamePasswordAuthenticationFilter.class
+                )
+                .addFilterAfter(
+                        gatewayAuthenticationFilter,
+                        GatewayApiKeyFilter.class
                 )
                 .build();
     }

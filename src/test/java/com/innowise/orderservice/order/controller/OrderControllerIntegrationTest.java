@@ -4,23 +4,35 @@ import com.innowise.orderservice.client.user.dto.UserInfoResponseDto;
 import com.innowise.orderservice.client.user.feign.UserServiceClient;
 import com.innowise.orderservice.common.AbstractIntegrationTest;
 import com.innowise.orderservice.common.annotation.WithMockCustomUser;
+import com.innowise.orderservice.common.kafka.KafkaConsumerFactory;
+import com.innowise.orderservice.common.kafka.KafkaProducerFactory;
+import com.innowise.orderservice.common.kafka.KafkaTestConsumer;
 import com.innowise.orderservice.item.entity.Item;
 import com.innowise.orderservice.item.repository.ItemRepository;
+import com.innowise.orderservice.kafka.event.CreateOrderEvent;
+import com.innowise.orderservice.kafka.event.PaymentCompletedEvent;
+import com.innowise.orderservice.kafka.event.PaymentStatus;
+import com.innowise.orderservice.kafka.properties.KafkaTopics;
 import com.innowise.orderservice.order.dto.request.CreateOrderRequestDto;
 import com.innowise.orderservice.order.dto.request.UpdateOrderRequestDto;
 import com.innowise.orderservice.order.entity.Order;
 import com.innowise.orderservice.order.entity.OrderStatus;
 import com.innowise.orderservice.order.repository.OrderRepository;
 import feign.FeignException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
@@ -28,6 +40,7 @@ import static com.innowise.orderservice.common.wiremock.UserServiceWireMockStub.
 import static com.innowise.orderservice.order.testclasses.OrderTestDataFactory.createOrderRequest;
 import static com.innowise.orderservice.order.testclasses.OrderTestDataFactory.updateOrderRequest;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -46,16 +59,47 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private UserServiceClient userServiceClient;
 
+    @Value("${gateway.api-key}")
+    private String gatewayApiKey;
+
+    private KafkaTestConsumer<CreateOrderEvent> orderEventConsumer;
+
+    private KafkaTestConsumer<PaymentCompletedEvent> paymentEventConsumer;
+
     @BeforeEach
     public void setUp() {
         orderRepository.deleteAll();
         itemRepository.deleteAll();
+
+        orderEventConsumer = new KafkaTestConsumer<>(
+                KafkaConsumerFactory.createConsumer(
+                        kafkaContainer,
+                        CreateOrderEvent.class,
+                        "order-test-" + UUID.randomUUID()
+                )
+        );
+        orderEventConsumer.subscribe(KafkaTopics.ORDER_CREATED);
+
+        paymentEventConsumer = new KafkaTestConsumer<>(
+                KafkaConsumerFactory.createConsumer(
+                        kafkaContainer,
+                        PaymentCompletedEvent.class,
+                        "payment-test-" + UUID.randomUUID()
+                )
+        );
+        paymentEventConsumer.subscribe(KafkaTopics.PAYMENT_COMPLETED);
+    }
+
+    @AfterEach
+    void tearDown() {
+        orderEventConsumer.close();
+        paymentEventConsumer.close();
     }
 
     @Test
-    @DisplayName("Should create order")
+    @DisplayName("Should create order and publish CreateOrderEvent to Kafka")
     @WithMockCustomUser
-    void create_ShouldCreateOrder() throws Exception {
+    void create_ShouldCreateOrderAndPublishEvent() throws Exception {
         UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
         Item item = itemRepository.save(
@@ -70,6 +114,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         CreateOrderRequestDto request = createOrderRequest(userId, item.getId());
 
         mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                 )
@@ -77,9 +122,127 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.order.userId").value(userId.toString()))
                 .andExpect(jsonPath("$.user.id").value(userId.toString()));
 
-        List<Order> orders = orderRepository.findAll();
+        CreateOrderEvent event = orderEventConsumer.receive();
+        assertThat(event).isNotNull();
+        assertThat(event.getUserId()).isEqualTo(userId);
+        assertThat(event.getTotalPrice()).isEqualByComparingTo(BigDecimal.valueOf(6000));
 
+        List<Order> orders = orderRepository.findAll();
         assertThat(orders).hasSize(1);
+        assertThat(orders.getFirst().getId()).isEqualTo(event.getOrderId());
+    }
+
+    @Test
+    @DisplayName("Should process PaymentCompletedEvent with SUCCESS and update order status to PROCESSING")
+    @WithMockCustomUser
+    void updateStatus_WhenPaymentSuccess_ShouldUpdateToProcessing() throws Exception {
+        UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
+        Order order = orderRepository.save(
+                Order.builder()
+                        .userId(userId)
+                        .status(OrderStatus.CREATED)
+                        .deleted(false)
+                        .totalPrice(BigDecimal.valueOf(150.00))
+                        .build()
+        );
+
+        PaymentCompletedEvent paymentEvent = PaymentCompletedEvent.builder()
+                .orderId(order.getId())
+                .status(PaymentStatus.SUCCESS)
+                .build();
+
+        KafkaTemplate<String, PaymentCompletedEvent> kafkaTemplate =
+                KafkaProducerFactory.createKafkaTemplate(kafkaContainer);
+
+        kafkaTemplate.send(
+                KafkaTopics.PAYMENT_COMPLETED,
+                order.getId().toString(),
+                paymentEvent
+        ).get(10, TimeUnit.SECONDS);
+
+        await().atMost(Duration.ofSeconds(15))
+                .pollInterval(Duration.ofMillis(500))
+                .until(() -> orderRepository.findById(order.getId())
+                        .map(o -> o.getStatus() == OrderStatus.PROCESSING)
+                        .orElse(false));
+
+        Order updatedOrder = orderRepository.findById(order.getId()).orElseThrow();
+        assertThat(updatedOrder.getStatus()).isEqualTo(OrderStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("Should process PaymentCompletedEvent with FAILED and update order status to CANCELLED")
+    @WithMockCustomUser
+    void updateStatus_WhenPaymentFailed_ShouldUpdateToCancelled() throws Exception {
+        UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
+        Order order = orderRepository.save(
+                Order.builder()
+                        .userId(userId)
+                        .status(OrderStatus.CREATED)
+                        .deleted(false)
+                        .totalPrice(BigDecimal.valueOf(150.00))
+                        .build()
+        );
+
+        PaymentCompletedEvent paymentEvent = PaymentCompletedEvent.builder()
+                .orderId(order.getId())
+                .status(PaymentStatus.FAILED)
+                .build();
+
+        KafkaTemplate<String, PaymentCompletedEvent> kafkaTemplate =
+                KafkaProducerFactory.createKafkaTemplate(kafkaContainer);
+
+        kafkaTemplate.send(
+                KafkaTopics.PAYMENT_COMPLETED,
+                order.getId().toString(),
+                paymentEvent
+        ).get(10, TimeUnit.SECONDS);
+
+        await().atMost(Duration.ofSeconds(15))
+                .pollInterval(Duration.ofMillis(500))
+                .until(() -> orderRepository.findById(order.getId())
+                        .map(o -> o.getStatus() == OrderStatus.CANCELLED)
+                        .orElse(false));
+
+        Order updatedOrder = orderRepository.findById(order.getId()).orElseThrow();
+        assertThat(updatedOrder.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+    }
+
+    @Test
+    @DisplayName("Should not change status when duplicate payment event received")
+    @WithMockCustomUser
+    void updateStatus_WhenDuplicateEvent_ShouldNotChangeStatus() throws Exception {
+        UUID userId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
+        Order order = orderRepository.save(
+                Order.builder()
+                        .userId(userId)
+                        .status(OrderStatus.PROCESSING)
+                        .deleted(false)
+                        .totalPrice(BigDecimal.valueOf(150.00))
+                        .build()
+        );
+
+        PaymentCompletedEvent paymentEvent = PaymentCompletedEvent.builder()
+                .orderId(order.getId())
+                .status(PaymentStatus.SUCCESS)
+                .build();
+
+        KafkaTemplate<String, PaymentCompletedEvent> kafkaTemplate =
+                KafkaProducerFactory.createKafkaTemplate(kafkaContainer);
+
+        kafkaTemplate.send(
+                KafkaTopics.PAYMENT_COMPLETED,
+                order.getId().toString(),
+                paymentEvent
+        ).get(10, TimeUnit.SECONDS);
+
+        Thread.sleep(3000);
+
+        Order updatedOrder = orderRepository.findById(order.getId()).orElseThrow();
+        assertThat(updatedOrder.getStatus()).isEqualTo(OrderStatus.PROCESSING);
     }
 
     @Test
@@ -91,13 +254,14 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         stubUser(wireMockServer, userId);
 
         String request = """
-            {
-                "userId": "%s",
-                "itemIds": []
-            }
-            """.formatted(userId.toString());
+                {
+                    "userId": "%s",
+                    "itemIds": []
+                }
+                """.formatted(userId.toString());
 
         mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isBadRequest());
@@ -108,13 +272,14 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     @WithMockCustomUser
     void create_ShouldReturn400_WhenUserIdNull() throws Exception {
         String request = """
-            {
-                "userId": null,
-                "itemIds": ["%s"]
-            }
-            """.formatted(UUID.randomUUID().toString());
+                {
+                    "userId": null,
+                    "itemIds": ["%s"]
+                }
+                """.formatted(UUID.randomUUID().toString());
 
         mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isBadRequest());
@@ -132,6 +297,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         CreateOrderRequestDto request = createOrderRequest(userId, nonExistentItemId);
 
         mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNotFound())
@@ -154,6 +320,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         CreateOrderRequestDto request = createOrderRequest(otherUserId, item.getId());
 
         mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
@@ -177,6 +344,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         CreateOrderRequestDto request = createOrderRequest(userId, item.getId());
 
         String response = mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                 )
@@ -191,7 +359,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
                         .asText()
         );
 
-        mockMvc.perform(get("/api/orders/{id}", orderId))
+        mockMvc.perform(get("/api/orders/{id}", orderId)
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.order.id").value(orderId.toString()));
     }
@@ -202,7 +371,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     void getById_ShouldReturn404_WhenOrderNotFound() throws Exception {
         UUID nonExistentOrderId = UUID.randomUUID();
 
-        mockMvc.perform(get("/api/orders/{id}", nonExistentOrderId))
+        mockMvc.perform(get("/api/orders/{id}", nonExistentOrderId)
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isNotFound());
     }
 
@@ -221,12 +391,13 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
                         .build()
         );
 
-        mockMvc.perform(get("/api/orders/{id}", order.getId()))
+        mockMvc.perform(get("/api/orders/{id}", order.getId())
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isForbidden());
     }
 
     @Test
-    @DisplayName("Should return 403 when accessing deleted order")
+    @DisplayName("Should return 404 when accessing deleted order")
     @WithMockCustomUser(role = "ROLE_ADMIN")
     void getById_ShouldReturn404_WhenOrderDeleted() throws Exception {
         UUID userId = UUID.randomUUID();
@@ -240,7 +411,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
                         .build()
         );
 
-        mockMvc.perform(get("/api/orders/{id}", order.getId()))
+        mockMvc.perform(get("/api/orders/{id}", order.getId())
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isNotFound());
     }
 
@@ -262,11 +434,13 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         CreateOrderRequestDto request = createOrderRequest(userId, item.getId());
 
         mockMvc.perform(post("/api/orders")
+                .header("X-Gateway-Key", gatewayApiKey)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(request))
         );
 
-        mockMvc.perform(get("/api/orders/my"))
+        mockMvc.perform(get("/api/orders/my")
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(1)));
     }
@@ -275,7 +449,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("Should return empty list when user has no orders")
     @WithMockCustomUser
     void getMyOrders_ShouldReturnEmptyList() throws Exception {
-        mockMvc.perform(get("/api/orders/my"))
+        mockMvc.perform(get("/api/orders/my")
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(0)))
                 .andExpect(jsonPath("$.totalElements").value(0));
@@ -308,6 +483,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         UpdateOrderRequestDto request = updateOrderRequest(item.getId());
 
         mockMvc.perform(patch("/api/orders/{id}", order.getId())
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                 )
@@ -315,7 +491,6 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.order.status").value("COMPLETED"));
 
         Order updated = orderRepository.findById(order.getId()).orElseThrow();
-
         assertThat(updated.getStatus()).isEqualTo(OrderStatus.COMPLETED);
     }
 
@@ -329,6 +504,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         UpdateOrderRequestDto request = updateOrderRequest(itemId);
 
         mockMvc.perform(patch("/api/orders/{id}", orderId)
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isForbidden());
@@ -344,6 +520,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         UpdateOrderRequestDto request = updateOrderRequest(itemId);
 
         mockMvc.perform(patch("/api/orders/{id}", nonExistentOrderId)
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isNotFound());
@@ -364,7 +541,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
                         .build()
         );
 
-        mockMvc.perform(delete("/api/orders/{id}", order.getId()))
+        mockMvc.perform(delete("/api/orders/{id}", order.getId())
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isNoContent());
     }
 
@@ -374,7 +552,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     void delete_ShouldReturn404_WhenOrderNotFound() throws Exception {
         UUID nonExistentOrderId = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/orders/{id}", nonExistentOrderId))
+        mockMvc.perform(delete("/api/orders/{id}", nonExistentOrderId)
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isNotFound());
     }
 
@@ -384,7 +563,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     void delete_ShouldReturn403_WhenNotAdmin() throws Exception {
         UUID orderId = UUID.randomUUID();
 
-        mockMvc.perform(delete("/api/orders/{id}", orderId))
+        mockMvc.perform(delete("/api/orders/{id}", orderId)
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isForbidden());
     }
 
@@ -392,7 +572,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("Admin should get all orders")
     @WithMockCustomUser(role = "ROLE_ADMIN")
     void getAll_ShouldReturnOrders() throws Exception {
-        mockMvc.perform(get("/api/orders"))
+        mockMvc.perform(get("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isOk());
     }
 
@@ -419,6 +600,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
                 .build());
 
         mockMvc.perform(get("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .param("statuses", "CREATED"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content", hasSize(1)))
@@ -430,6 +612,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     @WithMockCustomUser(role = "ROLE_ADMIN")
     void getAll_ShouldFilterByDateRange() throws Exception {
         mockMvc.perform(get("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .param("createdFrom", "2025-01-01T00:00:00")
                         .param("createdTo", "2025-12-31T23:59:59"))
                 .andExpect(status().isOk());
@@ -439,7 +622,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
     @DisplayName("Should return 403 when user tries get admin endpoint")
     @WithMockCustomUser
     void getAll_ShouldReturn403() throws Exception {
-        mockMvc.perform(get("/api/orders"))
+        mockMvc.perform(get("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isForbidden());
     }
 
@@ -460,10 +644,10 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
 
         CreateOrderRequestDto request = createOrderRequest(userId, item.getId());
 
-        mockMvc.perform(
-                        post("/api/orders")
-                                .contentType(MediaType.APPLICATION_JSON)
-                                .content(objectMapper.writeValueAsString(request))
+        mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request))
                 )
                 .andExpect(status().isServiceUnavailable());
     }
@@ -486,6 +670,7 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         CreateOrderRequestDto request = createOrderRequest(userId, item.getId());
 
         mockMvc.perform(post("/api/orders")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isServiceUnavailable());
@@ -493,7 +678,6 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         List<Order> orders = orderRepository.findAll();
         assertThat(orders).isEmpty();
     }
-
 
     @Test
     @DisplayName("Circuit breaker should open after multiple failures")
@@ -505,7 +689,8 @@ class OrderControllerIntegrationTest extends AbstractIntegrationTest {
         for (int i = 0; i < 4; i++) {
             try {
                 userServiceClient.getUserById(userId);
-            } catch (FeignException e) { }
+            } catch (FeignException e) {
+            }
         }
 
         try {

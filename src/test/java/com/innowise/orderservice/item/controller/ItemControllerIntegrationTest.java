@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 
 import java.util.UUID;
@@ -24,6 +25,9 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private ItemRepository itemRepository;
 
+    @Value("${gateway.api-key}")
+    private String gatewayApiKey;
+
     @BeforeEach
     void setUp() {
         itemRepository.deleteAll();
@@ -36,6 +40,7 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
         CreateItemRequestDto request = createItemRequest();
 
         mockMvc.perform(post("/api/items")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                 )
@@ -56,7 +61,8 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
     void getById_ShouldReturnItem() throws Exception {
         Item item = itemRepository.save(createItem());
 
-        mockMvc.perform(get("/api/items/{id}", item.getId()))
+        mockMvc.perform(get("/api/items/{id}", item.getId())
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(item.getId().toString()))
                 .andExpect(jsonPath("$.name").value("IPhone 17"))
@@ -68,7 +74,8 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
     void getAll_ShouldReturnItems() throws Exception {
         itemRepository.save(createItem());
 
-        mockMvc.perform(get("/api/items"))
+        mockMvc.perform(get("/api/items")
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
     }
@@ -82,6 +89,7 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
         UpdateItemRequestDto request = updateItemRequest();
 
         mockMvc.perform(patch("/api/items/{id}", item.getId())
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                 )
@@ -102,7 +110,8 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
     void delete_ShouldDeleteItem() throws Exception {
         Item item = itemRepository.save(createItem());
 
-        mockMvc.perform(delete("/api/items/{id}", item.getId()))
+        mockMvc.perform(delete("/api/items/{id}", item.getId())
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isNoContent());
 
         assertThat(itemRepository.findById(item.getId()))
@@ -116,6 +125,7 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
         CreateItemRequestDto request = createItemRequest();
 
         mockMvc.perform(post("/api/items")
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                 )
@@ -131,6 +141,7 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
         UpdateItemRequestDto request = updateItemRequest();
 
         mockMvc.perform(patch("/api/items/{id}", item.getId())
+                        .header("X-Gateway-Key", gatewayApiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                 )
@@ -143,14 +154,16 @@ class ItemControllerIntegrationTest extends AbstractIntegrationTest {
     void delete_WhenUserRole_ShouldReturn403() throws Exception {
         Item item = itemRepository.save(createItem());
 
-        mockMvc.perform(delete("/api/items/{id}", item.getId()))
+        mockMvc.perform(delete("/api/items/{id}", item.getId())
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     @DisplayName("Should return 404 when item not found")
     void getById_WhenItemNotExists_ShouldReturn404() throws Exception {
-        mockMvc.perform(get("/api/items/{id}", UUID.randomUUID()))
+        mockMvc.perform(get("/api/items/{id}", UUID.randomUUID())
+                        .header("X-Gateway-Key", gatewayApiKey))
                 .andExpect(status().isNotFound());
     }
 }

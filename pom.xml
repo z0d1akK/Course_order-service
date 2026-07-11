@@ -276,7 +276,7 @@
                         <exclude>**/mapper/**</exclude>
                         <exclude>**/kafka/**</exclude>
                         <exclude>**/config/**</exclude>
-                        <exclude>**/client/user/**</exclude>>
+                        <exclude>**/client/user/**</exclude>
                         <exclude>**/common/advice/**</exclude>
                         <exclude>**/common/validation/**</exclude>
                         <exclude>**/common/constants/**</exclude>

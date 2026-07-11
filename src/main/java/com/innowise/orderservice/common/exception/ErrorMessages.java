@@ -22,4 +22,6 @@ public class ErrorMessages {
     public static final String INTERNAL_SERVER_ERROR = "An unexpected error occurred. Please try again later.";
 
     public static final String USER_SERVICE_UNAVAILABLE = "User service is unavailable";
+
+    public static final String INVALID_GATEWAY_KEY = "Invalid Gateway Key";
 }

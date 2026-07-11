@@ -25,6 +25,7 @@ public class UserContextFeignInterceptor implements RequestInterceptor {
         copyHeader(template, request, Headers.USER_ID);
         copyHeader(template, request, Headers.USER_ROLE);
         copyHeader(template, request, Headers.USER_LOGIN);
+        copyHeader(template, request, Headers.GATEWAY_KEY);
     }
 
     private void copyHeader(RequestTemplate template, HttpServletRequest request, String header) {

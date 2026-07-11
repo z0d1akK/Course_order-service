@@ -28,15 +28,6 @@ public class ItemController {
 
     private final ItemService itemService;
 
-    /**
-     * Creates a new item available for ordering.
-     * Only users with ADMIN role can create items.
-     *
-     * @param request the create item request DTO containing item details
-     * @return ResponseEntity containing the created item response DTO with HTTP status 201 (Created)
-     * @throws com.innowise.orderservice.common.exception.BusinessException if request validation fails
-     * @throws org.springframework.security.access.AccessDeniedException if current user doesn't have ADMIN authority
-     */
     @Operation(summary = "Create item", description = "Creates a new item available for ordering")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "201", description = "Item successfully created")
@@ -55,14 +46,6 @@ public class ItemController {
         return ResponseEntity.status(HttpStatus.CREATED).body(itemService.create(request));
     }
 
-    /**
-     * Retrieves an item by its unique identifier.
-     * Available to all authenticated and unauthenticated users.
-     *
-     * @param id the UUID of the item to retrieve
-     * @return ResponseEntity containing the item response DTO with HTTP status 200 (OK)
-     * @throws com.innowise.orderservice.common.exception.ResourceNotFoundException if item with given id doesn't exist
-     */
     @Operation(summary = "Get item by id", description = "Returns item information")
     @ApiResponse(responseCode = "200", description = "Item found")
     @ApiResponse(responseCode = "404", description = "Item not found",
@@ -73,12 +56,6 @@ public class ItemController {
         return ResponseEntity.ok(itemService.getById(id));
     }
 
-    /**
-     * Retrieves all available items.
-     * Returns a complete list of items without pagination.
-     *
-     * @return ResponseEntity containing a list of all item response DTOs with HTTP status 200 (OK)
-     */
     @Operation(summary = "Get all items", description = "Returns all available items")
     @ApiResponse(responseCode = "200", description = "Items successfully retrieved")
     @GetMapping
@@ -86,17 +63,6 @@ public class ItemController {
         return ResponseEntity.ok(itemService.getAll());
     }
 
-    /**
-     * Updates an existing item by its identifier.
-     * Only users with ADMIN role can update items.
-     *
-     * @param id the UUID of the item to update
-     * @param request the update item request DTO containing updated fields
-     * @return ResponseEntity containing the updated item response DTO with HTTP status 200 (OK)
-     * @throws com.innowise.orderservice.common.exception.ResourceNotFoundException if item with given id doesn't exist
-     * @throws com.innowise.orderservice.common.exception.BusinessException if request validation fails
-     * @throws org.springframework.security.access.AccessDeniedException if current user doesn't have ADMIN authority
-     */
     @Operation(summary = "Update item", description = "Updates existing item")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "200", description = "Item successfully updated")
@@ -119,15 +85,6 @@ public class ItemController {
         return ResponseEntity.ok(itemService.update(id, request));
     }
 
-    /**
-     * Deletes an item by its unique identifier.
-     * Only users with ADMIN role can delete items.
-     *
-     * @param id the UUID of the item to delete
-     * @return ResponseEntity with HTTP status 204 (No Content) on successful deletion
-     * @throws com.innowise.orderservice.common.exception.ResourceNotFoundException if item with given id doesn't exist
-     * @throws org.springframework.security.access.AccessDeniedException if current user doesn't have ADMIN authority
-     */
     @Operation(summary = "Delete item", description = "Deletes item by identifier")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "204", description = "Item successfully deleted")

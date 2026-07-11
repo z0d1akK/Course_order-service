@@ -13,6 +13,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.kafka.KafkaContainer;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -27,6 +28,7 @@ public abstract class AbstractIntegrationTest {
     static void configureProperties(DynamicPropertyRegistry registry) {
         int port = WireMockConfiguration.getPort();
         registry.add("user-service.url", () -> "http://localhost:" + port);
+        registry.add("spring.kafka.bootstrap-servers", TestcontainersConfiguration.KAFKA::getBootstrapServers);
     }
 
     @Autowired
@@ -37,6 +39,9 @@ public abstract class AbstractIntegrationTest {
 
     @Autowired
     protected WireMockServer wireMockServer;
+
+    @Autowired
+    protected KafkaContainer kafkaContainer;
 
     @BeforeEach
     void resetWireMock() {

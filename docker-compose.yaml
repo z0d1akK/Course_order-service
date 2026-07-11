@@ -22,6 +22,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DRIVER: ${POSTGRES_DRIVER}
 
       USER_SERVICE_HOST: ${USER_SERVICE_HOST}
       USER_SERVICE_PORT: ${USER_SERVICE_PORT}
@@ -29,10 +30,14 @@ services:
       KAFKA_HOST: ${KAFKA_HOST}
       KAFKA_PORT: ${KAFKA_PORT}
 
+      GATEWAY_API_KEY: ${GATEWAY_API_KEY}
+
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
 
     depends_on:
       postgres:
+        condition: service_healthy
+      kafka:
         condition: service_healthy
 
     networks:
@@ -75,9 +80,47 @@ services:
       - order-service-network
 
 
+  kafka:
+    image: apache/kafka:4.3.1
+
+    container_name: order-service-kafka
+
+    restart: unless-stopped
+
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://${KAFKA_HOST}:${KAFKA_PORT},EXTERNAL://localhost:${KAFKA_HOST_PORT}
+      KAFKA_LISTENERS: CONTROLLER://${KAFKA_HOST}:${KAFKA_CONTROLLER_PORT},INTERNAL://${KAFKA_HOST}:${KAFKA_PORT},EXTERNAL://0.0.0.0:${KAFKA_HOST_PORT}
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@${KAFKA_HOST}:${KAFKA_CONTROLLER_PORT}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+    ports:
+      - "${KAFKA_HOST_PORT}:${KAFKA_HOST_PORT}"
+
+    healthcheck:
+      test: [ "CMD-SHELL", "ps aux | grep -v grep | grep kafka || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+    networks:
+      - kafka-network
+
 volumes:
   postgres-data:
-
+  kafka-data:
 
 networks:
   order-service-network:
@@ -87,5 +130,5 @@ networks:
     external: true
     name: user-service-network
   kafka-network:
-    external: true
+    driver: bridge
     name: kafka-network
